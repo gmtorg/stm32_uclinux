@@ -508,14 +508,13 @@ uartdone:
 		gpio_dsc.port = 0;
 		gpio_dsc.pin  = 0;
 		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_IN);
-		/* PE3 = LED_3
-		 * Here, things are tricky. The default hardware routes
-		 * the LED to a pin that interferes with RMII. The config
-		 * below assumes that the RMII signal is disconnected from
-		 * the LED and instead the LED is connected to the PE3 GPIO.
-		 */
-		gpio_dsc.port = 4;
-		gpio_dsc.pin  = 3;
+		/* PG13 = LED LD3 */
+		gpio_dsc.port = 6;
+		gpio_dsc.pin  = 13;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_OUT);
+		/* PG14 = LED LD4 */
+		gpio_dsc.port = 6;
+		gpio_dsc.pin  = 14;
 		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_OUT);
 	}
 

@@ -25,7 +25,7 @@
 
 #include <mach/exti.h>
 
-struct kinetis_exti_regs {
+struct stm32_exti_regs {
 	u32 imr;	/* Interrupt mask register */
 	u32 emr;	/* Event mask register */
 	u32 rtsr;	/* Rising trigger selection register */
@@ -37,9 +37,9 @@ struct kinetis_exti_regs {
 /*
  * EXTI register map base
  */
-#define KINETIS_EXTI_BASE	0x40013c00
-#define KINETIS_EXTI		((volatile struct kinetis_exti_regs *) \
-				KINETIS_EXTI_BASE)
+#define STM32_EXTI_BASE	0x40013c00
+#define STM32_EXTI		((volatile struct stm32_exti_regs *) \
+				STM32_EXTI_BASE)
 
 /*
  * Enable or disable interrupt on the rising edge of a event line
@@ -53,18 +53,18 @@ void stm32_exti_enable_int(unsigned int line, int enable)
 		stm32_exti_clear_pending(line);
 
 		/* Enable trigger on rising edge */
-		KINETIS_EXTI->rtsr |= (1 << line);
+		STM32_EXTI->rtsr |= (1 << line);
 		/* Disable trigger on falling edge */
-		KINETIS_EXTI->ftsr &= ~(1 << line);
+		STM32_EXTI->ftsr &= ~(1 << line);
 		/* Enable interrupt for the event */
-		KINETIS_EXTI->imr |= (1 << line);
+		STM32_EXTI->imr |= (1 << line);
 	} else {
 		/* Disable interrupt for the event */
-		KINETIS_EXTI->imr &= ~(1 << line);
+		STM32_EXTI->imr &= ~(1 << line);
 		/* Disable trigger on rising edge */
-		KINETIS_EXTI->rtsr &= ~(1 << line);
+		STM32_EXTI->rtsr &= ~(1 << line);
 		/* Disable trigger on falling edge */
-		KINETIS_EXTI->ftsr &= ~(1 << line);
+		STM32_EXTI->ftsr &= ~(1 << line);
 
 		stm32_exti_clear_pending(line);
 	}
@@ -80,6 +80,6 @@ EXPORT_SYMBOL(stm32_exti_enable_int);
 void stm32_exti_clear_pending(unsigned int line)
 {
 	if (line < STM32F2_EXTI_NUM_LINES)
-		KINETIS_EXTI->pr = (1 << line);
+		STM32_EXTI->pr = (1 << line);
 }
 EXPORT_SYMBOL(stm32_exti_clear_pending);

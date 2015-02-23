@@ -107,7 +107,7 @@ static struct clocksource clocksource_systick = {
 	.rating		= 200,
 	.read		= clocksource_systick_value_get,
 	.mask		= CLOCKSOURCE_MASK(CM3_SYSTICK_LOAD_RELOAD_BITWIDTH),
-	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
+	.flags		= CLOCK_SOURCE_IS_CONTINUOUS | CLOCK_SOURCE_VALID_FOR_HRES,
 };
 
 /*
@@ -120,8 +120,8 @@ void cortex_m3_register_systick_clocksource(u32 systick_clk)
 	 * in the bootloader.
 	 */
 	CM3_SYSTICK->load = CM3_SYSTICK_LOAD_RELOAD_MSK;
-	CM3_SYSTICK->val = 0;
-	CM3_SYSTICK->ctrl |= CM3_SYSTICK_CTRL_EN;
+	CM3_SYSTICK->val  = 0;
+	CM3_SYSTICK->ctrl = CM3_SYSTICK_CTRL_EN | CM3_SYSTICK_CTRL_SYSTICK_CPU;
 
 	/*
 	 * Finalize clocksource initialization and register it

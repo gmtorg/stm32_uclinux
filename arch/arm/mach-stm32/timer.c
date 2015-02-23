@@ -62,6 +62,7 @@
  * STM32 Timers IRQ numbers
  */
 #define STM32_TIM2_IRQ		28
+#define STM32_TIM5_IRQ		50
 
 /*
  * STM32 Timer reg bases
@@ -143,51 +144,78 @@ struct stm32_tim_regs {
 #define TICK_TIM_CLOCK		CLOCK_PTMR1
 
 /*
- * Reference clocks for the Timers
- */
-static unsigned int	tick_tmr_clk, src_tmr_clk;
-
-/*
- * Clock event device set mode function
+ * System timer clock event device set mode function
  */
 static void tick_tmr_set_mode(enum clock_event_mode mode,
 			     struct clock_event_device *clk)
 {
-	volatile struct stm32_tim_regs	*tim;
+	volatile struct stm32_tim_regs *tim;
 
 	tim = (struct stm32_tim_regs *)TICK_TIM_BASE;
 
-	switch (mode) {
-	case CLOCK_EVT_MODE_PERIODIC:
-		tim->cr1 |= STM32_TIM_CR1_CEN;
-		break;
-	case CLOCK_EVT_MODE_UNUSED:
-	case CLOCK_EVT_MODE_SHUTDOWN:
-	default:
-		tim->cr1 &= ~STM32_TIM_CR1_CEN;
-		break;
-	}
-}
+	switch (mode) 
+	{
+		/*
+		 * Enable the timer.
+		 */
+		case CLOCK_EVT_MODE_PERIODIC:
+		case CLOCK_EVT_MODE_RESUME:
+			tim->cr1 |= STM32_TIM_CR1_CEN;
+			break;
+		
+		/*
+		 * Disable the timer.
+		 */
+		case CLOCK_EVT_MODE_ONESHOT:
+		case CLOCK_EVT_MODE_UNUSED:
+		case CLOCK_EVT_MODE_SHUTDOWN:
+		default:
+			tim->cr1 &= ~STM32_TIM_CR1_CEN;
+			break;
+	}//switch
+}//tick_tmr_set_mode
+
+/*
+ * Configure the timer to generate an interrupt in the specified amount of ticks
+ */
+static int tick_tmr_set_next_event(unsigned long delta, 
+				struct clock_event_device *clk)
+{
+	volatile struct stm32_tim_regs	*tim;
+	unsigned long flags;
+
+	tim = (struct stm32_tim_regs *)TICK_TIM_BASE;
+
+	raw_local_irq_save(flags);
+	tim->arr = delta;
+	tim->cnt = 0;
+	tim->cr1|= STM32_TIM_CR1_CEN;
+	raw_local_irq_restore(flags);
+
+	return 0;
+}//tick_tmr_set_next_event
 
 /*
  * STM32 System Timer device
  */
-static struct clock_event_device	tick_tmr_clockevent = {
-	.name		= "STM32 System Timer",
-	.rating		= 200,
-	.irq		= TICK_TIM_IRQ,
-	.features	= CLOCK_EVT_FEAT_PERIODIC,
-	.set_mode	= tick_tmr_set_mode,
-	.cpumask	= cpu_all_mask,
+static struct clock_event_device tick_tmr_clockevent = 
+{
+	.name			= "STM32 System Timer",
+	.rating			= 200,
+	.irq			= TICK_TIM_IRQ,
+	.features		= CLOCK_EVT_FEAT_ONESHOT,
+	.set_mode		= tick_tmr_set_mode,
+	.set_next_event	= tick_tmr_set_next_event,
+	.cpumask		= cpu_all_mask,
 };
 
 /*
- * Timer IRQ handler
+ * System Timer IRQ handler
  */
 static irqreturn_t tick_tmr_irq_handler(int irq, void *dev_id)
 {
-	volatile struct stm32_tim_regs	*tim;
-	struct clock_event_device	*evt = &tick_tmr_clockevent;
+	volatile struct stm32_tim_regs *tim;
+	struct clock_event_device *evt = &tick_tmr_clockevent;
 
 	tim = (struct stm32_tim_regs *)TICK_TIM_BASE;
 
@@ -202,45 +230,27 @@ static irqreturn_t tick_tmr_irq_handler(int irq, void *dev_id)
 	evt->event_handler(evt);
 
 	return IRQ_HANDLED;
-}
+}//tick_tmr_irq_handler
 
 /*
  * System timer IRQ action
  */
-static struct irqaction	tick_tmr_irqaction = {
+static struct irqaction	tick_tmr_irqaction = 
+{
 	.name		= "STM32 Kernel Time Tick",
 	.flags		= IRQF_DISABLED | IRQF_TIMER | IRQF_IRQPOLL,
 	.handler	= tick_tmr_irq_handler,
 };
 
-#ifdef CONFIG_ARCH_STM32F1
-#define TICK_TIM_COUNTER_BITWIDTH	16	/* STM32F1: 16-bit timer */
-#else
-#define TICK_TIM_COUNTER_BITWIDTH	32	/* STM32F2: 32-bit timer */
-#endif
-
 /*
- * Clockevents init (sys timer)
+ * System Timer Clockevents init
  */
-static void tick_tmr_init(void)
+static void tick_tmr_init(u32 tmr_clk_freq)
 {
-	volatile struct stm32_tim_regs	*tim;
-	volatile u32			*rcc_enr, *rcc_rst;
-	struct clock_event_device	*evt = &tick_tmr_clockevent;
-
-	/* The target total timer divider (including the prescaler) */
-	u32 div;
-	/* The prescaler value will be (1 << psc_pwr) */
-	int psc_pwr;
-
-	/*
-	 * If the timer is 16-bit, then (div >> psc_pwr) must not exceed
-	 * (2**16 - 1).
-	 */
-	div = tick_tmr_clk / HZ;
-	psc_pwr = ilog2(div) - TICK_TIM_COUNTER_BITWIDTH + 1;
-	if (psc_pwr < 0)
-		psc_pwr = 0;
+	u64 max_delay_in_sec = ((u64)0xFFFFFFFF)/tmr_clk_freq;
+	volatile struct stm32_tim_regs *tim;
+	volatile u32 *rcc_enr, *rcc_rst;
+	struct clock_event_device *evt = &tick_tmr_clockevent;
 
 	/*
 	 * Setup reg bases
@@ -252,8 +262,8 @@ static void tick_tmr_init(void)
 	/*
 	 * Enable timer clock, and deinit registers
 	 */
-	*rcc_enr |= TICK_TIM_RCC_MSK;
-	*rcc_rst |= TICK_TIM_RCC_MSK;
+	*rcc_enr |=  TICK_TIM_RCC_MSK;
+	*rcc_rst |=  TICK_TIM_RCC_MSK;
 	*rcc_rst &= ~TICK_TIM_RCC_MSK;
 
 	/*
@@ -261,9 +271,10 @@ static void tick_tmr_init(void)
 	 * - upcounter;
 	 * - auto-reload
 	 */
-	tim->cr1 = STM32_TIM_CR1_ARPE;
-	tim->arr = (div >> psc_pwr);
-	tim->psc = (1 << psc_pwr) - 1;
+	tim->cr1 = 0;
+	tim->arr = 0xFFFFFFFF;
+	tim->psc = 0;
+	tim->cnt = 0;
 
 	/*
 	 * Generate an update event to reload the Prescaler value immediately
@@ -277,29 +288,16 @@ static void tick_tmr_init(void)
 	tim->dier |= STM32_TIM_DIER_UIE;
 
 	/*
-	 * For system timer we don't provide set_next_event method,
-	 * so, I guess, setting mult, shift, max_delta_ns, min_delta_ns
-	 * makes no sense (I verified that kernel works well without these).
-	 * Nevertheless, some clocksource drivers with periodic-mode only do
-	 * this. So, let's set them to some values too.
+	 * Set the fields required for the set_next_event method (tickless kernel support)
 	 */
-	clockevents_calc_mult_shift(evt, tick_tmr_clk / HZ, 5);
+	clockevents_calc_mult_shift(evt, tmr_clk_freq, max_delay_in_sec);
+	//evt->max_delta_ns = NSEC_PER_SEC * max_delay_in_sec;
+	//evt->min_delta_ns = clockevent_delta2ns(1, evt);
 	evt->max_delta_ns = clockevent_delta2ns(0xFFFFFFF0, evt);
 	evt->min_delta_ns = clockevent_delta2ns(0xF, evt);
 
 	clockevents_register_device(evt);
-}
-
-/*
- * Source clock init
- */
-static void src_tmr_init(void)
-{
-	/*
-	 * Use the Cortex-M3 SysTick timer
-	 */
-	cortex_m3_register_systick_clocksource(src_tmr_clk);
-}
+}//tick_tmr_init
 
 /*
  * Initialize the timer systems of the STM32
@@ -310,16 +308,14 @@ void __init stm32_timer_init(void)
 	 * Configure the STM32 clocks, and get the reference clock value
 	 */
 	stm32_clock_init();
-	tick_tmr_clk = stm32_clock_get(TICK_TIM_CLOCK);
-	src_tmr_clk  = stm32_clock_get(CLOCK_HCLK) / 8;
 
 	/*
-	 * Init clockevents (sys timer)
+	 * Add the Cortex-M3 SysTick timer to the clock source
 	 */
-	tick_tmr_init();
+	cortex_m3_register_systick_clocksource(stm32_clock_get(CLOCK_HCLK));
 
 	/*
-	 * Init clocksource
+	 * Add the clockevent for system tick
 	 */
-	src_tmr_init();
-}
+	tick_tmr_init(stm32_clock_get(TICK_TIM_CLOCK));
+}//stm32_timer_init
